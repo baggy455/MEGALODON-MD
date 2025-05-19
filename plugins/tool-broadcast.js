@@ -1,56 +1,69 @@
 const { cmd } = require('../command');
-const { sleep } = require('../lib/functions2');
 
 cmd({
-  pattern: "broadcast",
-  alias: ["bcgroup", "bc"],
-  category: "owner",
-  desc: "Send a text/media broadcast to all groups",
-  filename: __filename,
-  use: "<text or reply to a media>"
-}, async (conn, message, m, { q, isCreator, reply }) => {
-  try {
-    if (!isCreator) return reply("❌ Only the *bot owner* can use this command.");
-    if (!q && !message.quoted) return reply("❌ Provide a text or reply to an image/video!");
+    pattern: "broadcast",
+    alias: ["bc", "bcast"],
+    use: '.broadcast [text]',
+    desc: "Broadcast a message to all private chats and groups",
+    category: "owner",
+    filename: __filename,
+    owner: true
+}, async (conn, mek, m, { q, reply, sender }) => {
+    try {
+        if (!q) return reply("Please provide a message to broadcast.");
 
-    const groupsData = await conn.groupFetchAllParticipating();
-    const groupIds = Object.keys(groupsData);
-    const failed = [];
+        const allChats = await conn.chats.all();
 
-    reply(`📣 Broadcasting to *${groupIds.length}* groups...\n⏳ Please wait a moment.`);
+        const groupChats = allChats.filter(c => c.id.endsWith("@g.us"));
+        const privateChats = allChats.filter(c => c.id.endsWith("@s.whatsapp.net"));
 
-    for (const groupId of groupIds) {
-      try {
-        await sleep(1500);
+        let countPrivate = 0, countGroup = 0;
 
-        if (message.quoted && message.quoted.mtype?.includes("image")) {
-          const buffer = await message.quoted.download();
-          await conn.sendMessage(groupId, {
-            image: buffer,
-            caption: q || '',
-          });
-        } else if (message.quoted && message.quoted.mtype?.includes("video")) {
-          const buffer = await message.quoted.download();
-          await conn.sendMessage(groupId, {
-            video: buffer,
-            caption: q || '',
-          });
-        } else {
-          await conn.sendMessage(groupId, {
-            text: `*📢 Broadcast:*\n\n${q}`
-          });
+        // Texte du broadcast
+        const message = {
+            text: `📢 *Broadcast from MEGALODON-MD:*\n\n${q}`,
+            contextInfo: {
+                mentionedJid: [sender],
+                forwardingScore: 999,
+                isForwarded: true,
+                forwardedNewsletterMessageInfo: {
+                    newsletterJid: '120363401051937059@newsletter',
+                    newsletterName: "𝐌𝐄𝐆𝐀𝐋𝐎𝐃𝐎𝐍-𝐌𝐃",
+                    serverMessageId: 143
+                }
+            }
+        };
+
+        // Broadcast aux privés
+        for (const chat of privateChats) {
+            try {
+                await conn.sendMessage(chat.id, message);
+                countPrivate++;
+                await new Promise(r => setTimeout(r, 100));
+            } catch (e) {
+                console.log(`Failed to send to ${chat.id}:`, e.message);
+            }
         }
 
-      } catch (err) {
-        failed.push(groupId);
-        console.error(`❌ Error with ${groupId}:`, err.message);
-      }
+        // Broadcast aux groupes
+        for (const chat of groupChats) {
+            try {
+                await conn.sendMessage(chat.id, message);
+                countGroup++;
+                await new Promise(r => setTimeout(r, 150));
+            } catch (e) {
+                console.log(`Failed to send to group ${chat.id}:`, e.message);
+            }
+        }
+
+        // Confirmation à l'utilisateur
+        await conn.sendMessage(m.chat, {
+            text: `✅ Broadcast sent to:\n• ${countPrivate} private chats\n• ${countGroup} groups.`,
+            quoted: mek
+        });
+
+    } catch (err) {
+        console.error("Broadcast error:", err);
+        reply("An error occurred while broadcasting.");
     }
-
-    reply(`✅ Broadcast finished.\n\n*Success:* ${groupIds.length - failed.length}\n*Failed:* ${failed.length}${failed.length > 0 ? `\n\nFailed groups:\n${failed.join("\n")}` : ""}`);
-
-  } catch (err) {
-    console.error("Broadcast Error:", err);
-    await m.error(`❌ Error: ${err.message}`, err);
-  }
 });
